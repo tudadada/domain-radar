@@ -1,0 +1,8 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "surf.insight/domain-radar",
+  "description": "High-Speed Domain Keyword Matrix, TLD Coverage & RDAP Availability Radar (insight.surf)",
+  "maintainers": [
+    "tudadada"
+  ]
+}

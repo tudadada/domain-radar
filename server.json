@@ -1,48 +1,18 @@
 {
-  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/server.json",
   "name": "surf.insight/domain-radar",
-  "description": "High-Speed Domain Keyword Matrix, TLD Coverage & RDAP Availability Radar (insight.surf)",
-  "tools": [
+  "description": "High-Speed Domain Keyword Matrix, TLD Coverage & RDAP Availability Radar (Powered by insight.surf)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tudadada/domain-radar"
+  },
+  "packages": [
     {
-      "name": "scan_keyword_tlds",
-      "description": "Audits a core keyword across major TLDs (.com, .net, .org, .ai, .io, .co, .ca, .de) to report registration status and keyword commercial density.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "keyword": {
-            "type": "string",
-            "description": "The root keyword to audit across TLD extensions (e.g. permafrost, subsea, agent)"
-          }
-        },
-        "required": [
-          "keyword"
-        ]
-      }
-    },
-    {
-      "name": "find_available_combinations",
-      "description": "Generates industry-specific combinations (prefix/suffix) with a target keyword and checks Verisign RDAP to return 100% AVAILABLE domains.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "keyword": {
-            "type": "string",
-            "description": "Target keyword"
-          },
-          "position": {
-            "type": "string",
-            "enum": ["prefix", "suffix", "both"],
-            "description": "Position of keyword: prefix (keyword+word) or suffix (word+keyword)"
-          },
-          "industry": {
-            "type": "string",
-            "enum": ["tech", "energy", "finance", "arctic", "security", "general"],
-            "description": "Target industry dictionary"
-          }
-        },
-        "required": [
-          "keyword"
-        ]
+      "registryType": "npm",
+      "identifier": "domain-radar",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
       }
     }
   ]
