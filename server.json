@@ -6,12 +6,13 @@
     "url": "https://github.com/tudadada/domain-radar",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.0.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "domain-radar",
-      "version": "1.0.1",
+      "version": "1.0.2",
+      "registryBaseUrl": "https://registry.npmjs.org",
       "transport": {
         "type": "stdio"
       }
