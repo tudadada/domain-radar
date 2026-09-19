@@ -1,11 +1,12 @@
 {
-  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/server.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "surf.insight/domain-radar",
   "description": "High-Speed Domain Keyword Matrix, TLD Coverage & RDAP Availability Radar (Powered by insight.surf)",
   "repository": {
-    "type": "git",
-    "url": "https://github.com/tudadada/domain-radar"
+    "url": "https://github.com/tudadada/domain-radar",
+    "source": "github"
   },
+  "version": "1.0.1",
   "packages": [
     {
       "registryType": "npm",
