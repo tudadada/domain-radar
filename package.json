@@ -1,0 +1,36 @@
+{
+  "name": "domain-radar",
+  "version": "1.0.0",
+  "description": "Domain Name Intelligence, Keyword Extension Coverage & Availability Radar MCP Server (Powered by insight.surf)",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "domain-radar": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tudadada/domain-radar.git"
+  },
+  "homepage": "https://insight.surf",
+  "bugs": {
+    "url": "https://github.com/tudadada/domain-radar/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "domain",
+    "domain-radar",
+    "dotdb-alternative",
+    "whois",
+    "dns",
+    "domain-investing"
+  ],
+  "author": "tudadada",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}
