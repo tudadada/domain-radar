@@ -1,6 +1,6 @@
 {
   "name": "domain-radar",
-  "version": "1.0.2",
+  "version": "1.2.0",
   "mcpName": "surf.insight/domain-radar",
   "description": "Domain Name Intelligence, Keyword Extension Coverage & Availability Radar MCP Server (Powered by insight.surf)",
   "type": "module",
