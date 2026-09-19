@@ -11,7 +11,7 @@ import https from "https";
 const server = new Server(
   {
     name: "surf.insight/domain-radar",
-    version: "1.0.1",
+    version: "1.0.2",
   },
   {
     capabilities: {
@@ -40,6 +40,7 @@ const IANA_RDAP_BASES = {
   ca: "https://rdap.ca.fury.ca/rdap/domain/",
   de: "https://rdap.denic.de/domain/",
   io: "https://rdap.identitydigital.services/rdap/domain/",
+  ai: "https://rdap.identitydigital.services/rdap/domain/",
 };
 
 function queryRdap(url) {
@@ -110,9 +111,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         title: "Scan Keyword TLD Coverage",
         description:
           "Audits a core keyword across major authoritative RDAP registries (.com, .net, .org, .info, .biz, .ca, .de, .io, .ai) to measure commercial registration density and identify extensions not found in registry at time of check.",
-        readOnlyHint: true,
-        idempotentHint: true,
-        openWorldHint: true,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
         inputSchema: {
           type: "object",
           properties: {
@@ -129,9 +132,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         title: "Find Industry Keyword Combinations",
         description:
           "Generates industry-specific combinations (prefix/suffix) with a target keyword and queries authoritative RDAP registries with polite rate-limiting to discover candidate domains not found in registry at time of check.",
-        readOnlyHint: true,
-        idempotentHint: true,
-        openWorldHint: true,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
         inputSchema: {
           type: "object",
           properties: {
