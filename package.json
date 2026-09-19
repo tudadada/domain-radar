@@ -1,6 +1,7 @@
 {
   "name": "domain-radar",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "mcpName": "surf.insight/domain-radar",
   "description": "Domain Name Intelligence, Keyword Extension Coverage & Availability Radar MCP Server (Powered by insight.surf)",
   "type": "module",
   "main": "index.js",
@@ -28,7 +29,7 @@
     "dns",
     "domain-investing"
   ],
-  "author": "tudadada",
+  "author": "datutu",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"
