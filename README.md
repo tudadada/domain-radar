@@ -4,15 +4,21 @@
 [![Powered by insight.surf](https://img.shields.io/badge/Powered%20by-insight.surf-blue.svg)](https://insight.surf)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**Domain Radar** is a production-grade Model Context Protocol (MCP) server powered by **[insight.surf](https://insight.surf)**. Built for domain investors, founders, and autonomous AI research agents, it performs authoritative multi-TLD RDAP registry auditing and intelligent keyword combination discovery.
+**Domain Radar** is a production-grade Model Context Protocol (MCP) server powered by **[insight.surf](https://insight.surf)**. Built for domain investors, founders, and autonomous AI research agents, it performs authoritative multi-TLD RDAP registry auditing, keyword combination generation, and real-time live website activity probing.
 
 ## Core Capabilities
 
-- **Authoritative Multi-TLD RDAP Matrix**: Directly audits keyword registration status across major authoritative registry RDAP endpoints (`.com`, `.net`, `.org`, `.info`, `.biz`, `.ca`, `.de`, `.io`, `.ai`).
-- **Polite Rate Limiting & Throttling**: Queries registry endpoints in controlled batches with polite headers and backoff to prevent HTTP 429 throttling and IP blocks.
-- **Agent-Ready Metadata (`readOnlyHint: true`)**: Configured with official MCP annotations so autonomous agents (Claude Desktop, Cursor, etc.) can safely execute scans in automated loops without prompting for approval.
-- **No Overclaiming**: Reports exact ICANN RDAP status (`TAKEN` vs `NOT_FOUND_IN_REGISTRY`) rather than misleading DNS resolution guesses.
-- **Zero API Keys & $0 Operational Cost**: Runs locally via stdio. Connects directly to authoritative registry endpoints.
+- **1,200+ Global TLD Dynamic IANA Bootstrap**: Queries authoritative registries across over 1,200 top-level domains (`.com`, `.net`, `.org`, `.ai`, `.io`, `.xyz`, `.tech`, `.app`, `.cloud`, `.co`, `.de`, etc.).
+- **Live Activity Radar (In-Use vs Inactive/Parked)**: Probes registered domains in real-time via DNS and HTTP/HTTPS to classify them into:
+  - 🟢 **`UNREGISTERED`**: Not found in registry at audit time (available to register).
+  - 🔵 **`ACTIVE_IN_USE`**: Actively operating website/service (proof of commercial adoption).
+  - ⚪ **`INACTIVE_OR_PARKED`**: Registered but dormant (no DNS) or parked on domain aftermarket marketplaces (Dan, Sedo, HugeDomains, Afternic).
+- **Flexible Keyword Positioning**: Generate combinations with keyword as `prefix` (`kw+word`), `suffix` (`word+kw`), or `inside` (`mod+kw+word`).
+- **Hyphen & Numeric Pattern Controls**:
+  - Hyphen: `none` (unhyphenated), `hyphen_only` (hyphenated), or `both`.
+  - Numbers: `none` (letters only), `include` (with high-value commercial patterns like `24`, `365`, `360`, `247`, `101`, `88`), or `numbers_only`.
+- **Autonomous Agent-Ready (`readOnlyHint: true`)**: Properly encapsulated in the official MCP `annotations` object so AI clients (Claude Desktop, Cursor) execute automated research loops without permission prompts.
+- **Polite Rate Limiting & Zero API Keys**: Batch-throttled to avoid HTTP 429 rate limits. Runs locally via stdio at $0 operational cost.
 
 ## Quick Start
 
@@ -36,8 +42,9 @@ npx domain-radar
 
 ## Tools Included
 
-1. `scan_keyword_tlds`: Scans keyword registration density and commercial saturation across 9+ premier TLDs using official RDAP endpoints.
-2. `find_available_combinations`: Generates industry-targeted domain combinations (arctic, energy, tech, finance, security) and identifies candidates not found in the registry at time of check.
+1. `search_keyword_domains`: Full DotDB-equivalent search engine. Supports keyword positioning (`beginning`, `end`, `any`), character filters (`include_alphabets`, `include_digits`, `include_hyphens`), live site status probing (`active`, `parked`, `inactive`, `unregistered`), and custom TLD lists across 1,200+ IANA extensions.
+2. `scan_keyword_tlds`: Audits exact keyword registration coverage across 1,200+ authoritative TLDs and probes real-time web activity.
+3. `search_keyword_combinations` & `find_available_combinations`: Backward-compatible aliases for legacy workflows.
 
 ## Official Namespace
 Namespace Identifier: `surf.insight/domain-radar`
