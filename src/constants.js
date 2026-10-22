@@ -94,3 +94,11 @@ export const PARKED_KEYWORDS = [
   "domain owner",
   "this page is parked"
 ];
+
+export const CCTLD_POLICY_NOTES = {
+  vn: "VNNIC (Vietnam) restricts Port 43 and RDAP to accredited registrars; public access is available only via CAPTCHA web portal.",
+  de: "DENIC (Germany) does not publish creation dates on Port 43 or RDAP under German data protection regulations.",
+  eu: "EURid (European Union) redacts creation dates on Port 43 WHOIS under EU GDPR policies.",
+  ch: "Switch (Switzerland) restricts creation date disclosure on automated WHOIS queries.",
+  jp: "JPRS (Japan) does not disclose creation dates for general .jp domains via standard WHOIS."
+};

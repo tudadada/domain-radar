@@ -1,4 +1,4 @@
-import { USER_AGENT, BUILTIN_RDAP_BASES, BUILTIN_WHOIS_SERVERS } from "./constants.js";
+import { USER_AGENT, BUILTIN_RDAP_BASES, BUILTIN_WHOIS_SERVERS, CCTLD_POLICY_NOTES } from "./constants.js";
 import { fetchWithTimeout } from "./utils.js";
 import net from "net";
 import dns from "dns/promises";
@@ -274,6 +274,9 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
           return whoisFallback;
         }
       }
+      if (result.details && !result.details.creationDate && CCTLD_POLICY_NOTES[tld]) {
+        result.details.policyNote = CCTLD_POLICY_NOTES[tld];
+      }
       return result;
     }
 
@@ -286,6 +289,9 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
   if (returnFullDetails) {
     const whoisRes = await queryWhoisFallback(domain);
     if (whoisRes.status === "TAKEN" || whoisRes.status === "NOT_FOUND_IN_REGISTRY") {
+      if (whoisRes.details && !whoisRes.details.creationDate && CCTLD_POLICY_NOTES[tld]) {
+        whoisRes.details.policyNote = CCTLD_POLICY_NOTES[tld];
+      }
       return whoisRes;
     }
   }
@@ -293,7 +299,13 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
   // Authoritative DNS Name Server delegation fallback
   try {
     const ns = await dns.resolveNs(domain);
-    if (ns && ns.length > 0) return returnFullDetails ? { status: "TAKEN", details: { dns: ns, source: "DNS Delegation" } } : "TAKEN";
+    if (ns && ns.length > 0) {
+      const details = { dns: ns, source: "DNS Delegation" };
+      if (CCTLD_POLICY_NOTES[tld]) {
+        details.policyNote = CCTLD_POLICY_NOTES[tld];
+      }
+      return returnFullDetails ? { status: "TAKEN", details } : "TAKEN";
+    }
   } catch (err) {
     if (err.code === "ENOTFOUND" || err.code === "ENODATA") {
       return returnFullDetails ? { status: "NOT_FOUND_IN_REGISTRY" } : "NOT_FOUND_IN_REGISTRY";
