@@ -56,11 +56,19 @@ async function isWildcardTld(tld) {
 }
 
 /**
- * Escapes CSV special characters to ensure valid RFC 4180 format.
+ * Escapes CSV special characters to ensure valid RFC 4180 format
+ * and sanitizes formula injection vectors (CWE-1236 / DDE injection).
  */
 function escapeCsvField(val) {
   if (val === null || val === undefined) return "";
-  const str = String(val);
+  let str = String(val);
+
+  // Prevent CSV Formula Injection (CWE-1236):
+  // Disarm formula triggers (=, +, -, @, tab, CR) by prefixing with a single quote
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+
   if (str.includes(",") || str.includes("\"") || str.includes("\n") || str.includes("\r")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -115,6 +123,45 @@ export function buildCsvContent(records, keyword) {
   return rows.join("\r\n");
 }
 
+
+/**
+ * Resolves a safe CSV export path to prevent path traversal and arbitrary file overwrite.
+ * Enforces destination inside current working directory, forces .csv extension,
+ * and appends timestamp if the target file already exists.
+ */
+async function resolveSafeCsvPath(customPath, defaultFilename) {
+  const cwd = path.resolve(process.cwd());
+  let targetPath;
+
+  if (customPath && typeof customPath === "string") {
+    const candidate = path.resolve(cwd, customPath);
+    if (candidate.startsWith(cwd + path.sep)) {
+      targetPath = candidate;
+    } else {
+      // Path traversal or absolute outside CWD detected! Fallback to defaultFilename in cwd
+      targetPath = path.resolve(cwd, defaultFilename);
+    }
+  } else {
+    targetPath = path.resolve(cwd, defaultFilename);
+  }
+
+  // Force .csv extension
+  if (!targetPath.toLowerCase().endsWith(".csv")) {
+    targetPath = `${targetPath}.csv`;
+  }
+
+  // Prevent accidental file overwrite: make unique if file already exists
+  try {
+    await fs.access(targetPath);
+    const ext = path.extname(targetPath);
+    const base = targetPath.slice(0, -ext.length);
+    targetPath = `${base}_${Date.now()}${ext}`;
+  } catch {
+    // File does not exist yet
+  }
+
+  return targetPath;
+}
 export function registerTools(server) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -149,7 +196,7 @@ export function registerTools(server) {
               },
               csv_path: {
                 type: "string",
-                description: "Optional custom file path to save the exported CSV (e.g. './apple_timeline.csv'). Defaults to current directory."
+                description: "Optional custom file name or relative path inside current directory to save CSV (e.g. './apple_timeline.csv'). Path traversal is strictly sanitized."
               },
               min_year: {
                 type: "integer",
@@ -464,18 +511,18 @@ export function registerTools(server) {
         }
       });
 
-      // 6. Generate CSV file if requested
+      // 6. Generate CSV file if requested (with path sanitization and overwrite protection)
       let csvFilePath = null;
       let csvRaw = null;
       if (exportCsv && registeredRecords.length > 0) {
         csvRaw = buildCsvContent(registeredRecords, rawKw);
         const fileName = `${rawKw}_tld_timeline_${Date.now()}.csv`;
-        const targetPath = args?.csv_path ? path.resolve(args.csv_path) : path.resolve(process.cwd(), fileName);
+        const targetPath = await resolveSafeCsvPath(args?.csv_path, fileName);
         try {
-          await fs.writeFile(targetPath, csvRaw, "utf8");
+          await fs.writeFile(targetPath, csvRaw, { encoding: "utf8", flag: "wx" });
           csvFilePath = targetPath;
         } catch (e) {
-          const fallbackPath = path.resolve(process.cwd(), fileName);
+          const fallbackPath = path.resolve(process.cwd(), `${rawKw}_tld_timeline_${Date.now()}_fallback.csv`);
           await fs.writeFile(fallbackPath, csvRaw, "utf8");
           csvFilePath = fallbackPath;
         }
