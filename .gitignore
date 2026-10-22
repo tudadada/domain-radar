@@ -1,6 +1,11 @@
 node_modules/
 package-lock.json
-test_*.js
+.keys/
+.tools/
+*.key
+*.pem
+*.env
 *.csv
+test_*.js
 .DS_Store
 *.log

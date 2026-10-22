@@ -12,6 +12,50 @@ import fs from "fs/promises";
 import path from "path";
 
 /**
+ * Verifies basic network DNS connectivity to prevent false negative reports on network drop.
+ */
+async function verifyNetworkConnectivity() {
+  const canaryHosts = ["iana.org", "dns.google", "cloudflare.com"];
+  for (const host of canaryHosts) {
+    try {
+      const res = await dns.resolve(host);
+      if (res && res.length > 0) return true;
+    } catch (e) {}
+  }
+  return false;
+}
+
+/**
+ * Canary wildcard DNS detector per TLD.
+ * Prevents ccTLD / registrar wildcards from falsely claiming all arbitrary domains are registered.
+ */
+const wildcardTldCache = new Map();
+
+async function isWildcardTld(tld) {
+  if (wildcardTldCache.has(tld)) {
+    return wildcardTldCache.get(tld);
+  }
+  const canaryDomain = `canary-chk-${Math.random().toString(36).slice(2, 10)}-audit.${tld}`;
+  let isWild = false;
+  try {
+    const [ns, ip] = await Promise.allSettled([
+      dns.resolveNs(canaryDomain),
+      dns.resolve(canaryDomain)
+    ]);
+    if (
+      (ns.status === "fulfilled" && ns.value && ns.value.length > 0) ||
+      (ip.status === "fulfilled" && ip.value && ip.value.length > 0)
+    ) {
+      isWild = true;
+    }
+  } catch (e) {
+    isWild = false;
+  }
+  wildcardTldCache.set(tld, isWild);
+  return isWild;
+}
+
+/**
  * Escapes CSV special characters to ensure valid RFC 4180 format.
  */
 function escapeCsvField(val) {
@@ -100,7 +144,7 @@ export function registerTools(server) {
               },
               export_csv: {
                 type: "boolean",
-                default: true,
+                default: false,
                 description: "Whether to export the full results to a local CSV file (default: true). Highly recommended for large datasets."
               },
               csv_path: {
@@ -245,12 +289,16 @@ export function registerTools(server) {
     if (!rawKw) throw new Error("A valid keyword is required");
 
     if (name === "scan_keyword_tlds") {
+      const isOnline = await verifyNetworkConnectivity();
+      if (!isOnline) {
+        throw new Error("DNS network connectivity check failed: Unable to resolve root nameservers. Please verify your internet connection before scanning.");
+      }
       const scope = args?.scope || "all";
       const sortBy = args?.sort_by || "year_asc";
       const probeActivity = args?.probe_activity === true;
       const concurrency = typeof args?.concurrency === "number" ? Math.min(Math.max(args.concurrency, 10), 100) : 40;
       const limit = typeof args?.limit === "number" ? args.limit : 1000;
-      const exportCsv = args?.export_csv !== false; // Default: true
+      const exportCsv = args?.export_csv === true; // Default: false
 
       const minYear = typeof args?.min_year === "number" ? args.min_year : null;
       const maxYear = typeof args?.max_year === "number" ? args.max_year : null;
@@ -261,54 +309,100 @@ export function registerTools(server) {
       // 2. High-speed concurrent DNS pre-filter across all targeted TLDs
       const takenCandidates = [];
       const unregisteredTlds = [];
+      const unverifiedTlds = [];
 
       await asyncPool(concurrency, targetTlds, async (tld) => {
         const domain = `${rawKw}.${tld}`;
+        let hasNs = false;
+        let hasIp = false;
+
         try {
           const ns = await dns.resolveNs(domain);
-          if (ns && ns.length > 0) {
-            takenCandidates.push({ domain, tld });
-            return;
-          }
+          if (ns && ns.length > 0) hasNs = true;
         } catch (e) {
+          // If DNS failed with temporary/network error, don't assume unregistered yet
+        }
+
+        if (!hasNs) {
           try {
             const ip = await dns.resolve(domain);
-            if (ip && ip.length > 0) {
-              takenCandidates.push({ domain, tld });
+            if (ip && ip.length > 0) hasIp = true;
+          } catch (e) {
+            if (e.code !== "ENOTFOUND" && e.code !== "ENODATA" && e.code !== "EBADNAME") {
+              // Network or resolver failure
+              unverifiedTlds.push({ tld, reason: e.code || e.message });
               return;
             }
-          } catch (e2) {}
+          }
         }
-        unregisteredTlds.push(tld);
+
+        if (hasNs || hasIp) {
+          const isWildcard = await isWildcardTld(tld);
+          takenCandidates.push({ domain, tld, isWildcard });
+        } else {
+          unregisteredTlds.push(tld);
+        }
       });
 
       // 3. For taken candidates, query RDAP/WHOIS to extract registration year & creation date
       let registeredRecords = [];
       const rdapPoolLimit = 10;
 
-      await asyncPool(rdapPoolLimit, takenCandidates.slice(0, limit), async ({ domain, tld }) => {
+      await asyncPool(rdapPoolLimit, takenCandidates.slice(0, limit), async ({ domain, tld, isWildcard }) => {
         try {
           const res = await checkDomainStatus(domain, tld, true);
-          const details = res?.details || {};
-          const creationDate = details.creationDate || null;
-          
-          let year = null;
-          if (creationDate) {
-            const yMatch = String(creationDate).match(/\b(19\d{2}|20\d{2})\b/);
-            if (yMatch) year = parseInt(yMatch[1], 10);
+
+          // Bug 1 Fix: Explicitly exclude domains confirmed not registered
+          if (res?.status === "NOT_FOUND_IN_REGISTRY" || res?.status === "AVAILABLE") {
+            unregisteredTlds.push(tld);
+            return;
           }
 
+          if (res?.status === "TAKEN") {
+            const details = res?.details || {};
+            const creationDate = details.creationDate || null;
+            
+            let year = null;
+            if (creationDate) {
+              const yMatch = String(creationDate).match(/\b(19\d{2}|20\d{2})\b/);
+              if (yMatch) year = parseInt(yMatch[1], 10);
+            }
+
+            registeredRecords.push({
+              domain,
+              tld,
+              registration_year: year,
+              registration_date: creationDate || "Unknown",
+              expiration_date: details.expirationDate || "Unknown",
+              registrar: details.registrar || "Private / Protected",
+              status: "TAKEN",
+              source: details.source || "Registry"
+            });
+            return;
+          }
+
+          // Bug 2 Fix: If status is not TAKEN, wildcard TLDs cannot rely on DNS delegation!
+          if (isWildcard) {
+            unverifiedTlds.push({ tld, reason: "Wildcard DNS without authoritative RDAP/WHOIS record" });
+            return;
+          }
+
+          // For standard TLDs, DNS resolution is a solid delegation indicator even if RDAP timed out or has no server
           registeredRecords.push({
             domain,
             tld,
-            registration_year: year,
-            registration_date: creationDate || "Unknown",
-            expiration_date: details.expirationDate || "Unknown",
-            registrar: details.registrar || "Private / Protected",
-            status: res?.status || "TAKEN",
-            source: details.source || "Registry"
+            registration_year: null,
+            registration_date: "Unknown",
+            expiration_date: "Unknown",
+            registrar: "Private / Protected",
+            status: "TAKEN",
+            source: "DNS Delegation"
           });
         } catch (err) {
+          if (isWildcard) {
+            unverifiedTlds.push({ tld, reason: "Wildcard DNS inspection error" });
+            return;
+          }
           registeredRecords.push({
             domain,
             tld,
@@ -433,6 +527,9 @@ export function registerTools(server) {
       if (topRegistrars.length > 0) {
         md += `- **Top Sponsoring Registrars**: ${topRegistrars.join(", ")}\n`;
       }
+      if (unverifiedTlds.length > 0) {
+        md += `\n> [!WARNING] **${unverifiedTlds.length}** TLDs could not be definitively verified due to wildcard DNS or network/resolver timeouts.\n`;
+      }
       if (csvFilePath) {
         const forwardSlashPath = csvFilePath.replace(/\\/g, "/");
         md += `- **Exported CSV Spreadsheet**: [\`${path.basename(csvFilePath)}\`](file:///${forwardSlashPath})\n`;
@@ -490,6 +587,7 @@ export function registerTools(server) {
         sort_by: sortBy,
         total_tlds_scanned: targetTlds.length,
         total_registered_found: registeredRecords.length,
+        total_unverified: unverifiedTlds.length,
         csv_file_path: csvFilePath,
         csv_exported: exportCsv && Boolean(csvFilePath),
         oldest_registration: oldest ? { domain: oldest.domain, year: oldest.registration_year, date: oldest.registration_date } : null,
@@ -503,6 +601,7 @@ export function registerTools(server) {
         },
         registered_domains: registeredRecords,
         unregistered_sample: unregisteredTlds.slice(0, 50),
+        unverified_sample: unverifiedTlds.slice(0, 20),
         markdown_summary: md,
         audited_at: new Date().toISOString()
       };

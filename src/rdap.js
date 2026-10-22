@@ -6,6 +6,21 @@ import dns from "dns/promises";
 let ianaBootstrapCache = null;
 let ianaBootstrapPromise = null;
 
+// Registry host-level polite rate limiter to prevent HTTP 429 (especially Identity Digital & Verisign)
+const hostQueues = new Map();
+
+async function throttleHost(hostname, minIntervalMs = 90) {
+  if (!hostQueues.has(hostname)) {
+    hostQueues.set(hostname, Promise.resolve());
+  }
+  const current = hostQueues.get(hostname);
+  const next = current.then(async () => {
+    await new Promise(resolve => setTimeout(resolve, minIntervalMs));
+  });
+  hostQueues.set(hostname, next);
+  await current;
+}
+
 export async function getIanaMap() {
   if (ianaBootstrapCache) return ianaBootstrapCache;
   if (!ianaBootstrapPromise) {
@@ -72,23 +87,13 @@ export async function queryWhoisFallback(domain) {
   const whoisData = await fetchWhoisRaw(whoisServer, queryStr);
   if (!whoisData) return { status: "UNKNOWN" };
 
-  const lower = whoisData.toLowerCase();
-  
-  if (
-    lower.includes("no match") ||
-    lower.includes("not found") ||
-    lower.includes("no data found") ||
-    lower.includes("is free") ||
-    lower.includes("available for registration") ||
-    lower.includes("do not have an entry") ||
-    lower.includes("nothing found")
-  ) {
-    return { status: "NOT_FOUND_IN_REGISTRY" };
-  }
+  // --- LOGIC BUG 4 FIX: Check for POSITIVE registration indicators FIRST ---
+  // Many registries place "not found" disclaimers in the footer/TOS.
+  // We must look for creation date, status, nameservers, or registrar before checking negative keywords.
 
-  // Parse creation date
+  // 1. Check creation date
   let creationDate = null;
-  const createMatch = whoisData.match(/(?:creation\s+date|created|registered\s+on|registration\s+time|entry\s+created|created-date|reg-date|registered)[\s:]+([^\r\n]+)/i);
+  const createMatch = whoisData.match(/(?:creation\s+date|created|registered\s+on|registration\s+time|entry\s+created|created-date|reg-date)[\s:]+([^\r\n]+)/i);
   if (createMatch && createMatch[1]) {
     const rawDate = createMatch[1].trim();
     const d = new Date(rawDate);
@@ -100,7 +105,7 @@ export async function queryWhoisFallback(domain) {
     }
   }
 
-  // Parse expiration date
+  // 2. Check expiration date
   let expirationDate = null;
   const expireMatch = whoisData.match(/(?:registry\s+expiry\s+date|expiry\s+date|expiration\s+date|paid-till|expires\s+on|expires)[\s:]+([^\r\n]+)/i);
   if (expireMatch && expireMatch[1]) {
@@ -109,26 +114,56 @@ export async function queryWhoisFallback(domain) {
     if (!isNaN(d.getTime())) expirationDate = d.toISOString();
   }
 
-  // Parse registrar
-  let registrar = "Unknown Registrar";
+  // 3. Check registrar
+  let registrar = null;
   const regMatch = whoisData.match(/(?:registrar|registrar\s+name|sponsoring\s+registrar)[\s:]+([^\r\n]+)/i);
   if (regMatch && regMatch[1]) {
     registrar = regMatch[1].trim();
   }
 
-  return {
-    status: "TAKEN",
-    details: {
-      creationDate,
-      expirationDate,
-      registrar,
-      source: `WHOIS (${whoisServer})`
-    }
-  };
+  // 4. Check nameservers or positive status
+  const hasNs = /(?:nameserver|nserver|name\s+server)[\s:]+/i.test(whoisData);
+  const hasDomainStatus = /(?:domain\s+status|status)[\s:]+(?:ok|active|client|server)/i.test(whoisData);
+
+  // If any strong positive indicator exists, the domain is TAKEN
+  if (creationDate || registrar || hasNs || hasDomainStatus) {
+    return {
+      status: "TAKEN",
+      details: {
+        creationDate,
+        expirationDate,
+        registrar: registrar || "Unknown Registrar",
+        source: `WHOIS (${whoisServer})`
+      }
+    };
+  }
+
+  // 5. Only if NO positive indicators were found, check negative "not found" patterns
+  const lower = whoisData.toLowerCase();
+  if (
+    lower.includes("no match") ||
+    lower.includes("not found") ||
+    lower.includes("no data found") ||
+    lower.includes("is free") ||
+    lower.includes("available for registration") ||
+    lower.includes("do not have an entry") ||
+    lower.includes("nothing found") ||
+    lower.includes("domain not found")
+  ) {
+    return { status: "NOT_FOUND_IN_REGISTRY" };
+  }
+
+  return { status: "UNKNOWN" };
 }
 
 export async function queryRdap(url, domain) {
   try {
+    // Apply host throttle to respect registry rate limits
+    try {
+      const parsedUrl = new URL(url);
+      await throttleHost(parsedUrl.hostname, 80);
+    } catch (e) {}
+
     const res = await fetchWithTimeout(url, {
       headers: { 
         "User-Agent": USER_AGENT,
@@ -214,7 +249,12 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
     const result = await queryRdap(targetUrl, domain);
     
     if (returnFullDetails) {
-      // If RDAP had no creation date or was TIMEOUT/UNKNOWN, try fallback WHOIS
+      // If RDAP returned 404, the domain is definitively NOT registered
+      if (result.status === "NOT_FOUND_IN_REGISTRY") {
+        return result;
+      }
+
+      // If RDAP was TIMEOUT or had no creation date, try fallback socket WHOIS
       if (result.status !== "NOT_FOUND_IN_REGISTRY" && !result.details?.creationDate) {
         const whoisFallback = await queryWhoisFallback(domain);
         if (whoisFallback.status === "TAKEN") {
@@ -230,6 +270,8 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
             result.details.expirationDate = whoisFallback.details.expirationDate;
           }
           result.details.source = whoisFallback.details?.source || "WHOIS";
+        } else if (whoisFallback.status === "NOT_FOUND_IN_REGISTRY") {
+          return whoisFallback;
         }
       }
       return result;
@@ -243,7 +285,9 @@ export async function checkDomainStatus(domain, tld, returnFullDetails = false) 
   // Fallback to WHOIS socket if no RDAP base was found
   if (returnFullDetails) {
     const whoisRes = await queryWhoisFallback(domain);
-    if (whoisRes.status === "TAKEN") return whoisRes;
+    if (whoisRes.status === "TAKEN" || whoisRes.status === "NOT_FOUND_IN_REGISTRY") {
+      return whoisRes;
+    }
   }
 
   // Authoritative DNS Name Server delegation fallback

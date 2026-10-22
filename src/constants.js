@@ -1,4 +1,4 @@
-export const USER_AGENT = "domain-radar/2.0.0 (https://insight.surf; support@insight.surf)";
+export const USER_AGENT = "domain-radar/2.1.0 (https://insight.surf; support@insight.surf)";
 export const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
 export const INDUSTRY_DICTIONARIES = {

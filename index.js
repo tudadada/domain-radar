@@ -6,7 +6,7 @@ import { registerTools } from "./src/mcp-tools.js";
 const server = new Server(
   {
     name: "surf.insight/domain-radar",
-    version: "2.0.0",
+    version: "2.1.0",
   },
   {
     capabilities: {
