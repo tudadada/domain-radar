@@ -10,6 +10,7 @@ import { getTldList } from "./iana-tlds.js";
 import dns from "dns/promises";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
 
 /**
  * Verifies basic network DNS connectivity to prevent false negative reports on network drop.
@@ -132,14 +133,16 @@ export function buildCsvContent(records, keyword) {
 async function resolveSafeCsvPath(customPath, defaultFilename) {
   const cwd = path.resolve(process.cwd());
   let targetPath;
+  let notice = null;
 
   if (customPath && typeof customPath === "string") {
     const candidate = path.resolve(cwd, customPath);
     if (candidate.startsWith(cwd + path.sep)) {
       targetPath = candidate;
     } else {
-      // Path traversal or absolute outside CWD detected! Fallback to defaultFilename in cwd
+      // Path traversal or absolute outside CWD detected!
       targetPath = path.resolve(cwd, defaultFilename);
+      notice = `The requested csv_path "${customPath}" was restricted for security (outside current directory) and redirected to "${path.basename(targetPath)}".`;
     }
   } else {
     targetPath = path.resolve(cwd, defaultFilename);
@@ -155,12 +158,16 @@ async function resolveSafeCsvPath(customPath, defaultFilename) {
     await fs.access(targetPath);
     const ext = path.extname(targetPath);
     const base = targetPath.slice(0, -ext.length);
-    targetPath = `${base}_${Date.now()}${ext}`;
+    const newName = `${base}_${Date.now()}${ext}`;
+    if (!notice) {
+      notice = `The file "${path.basename(targetPath)}" already exists; saved to "${path.basename(newName)}" to prevent overwriting.`;
+    }
+    targetPath = newName;
   } catch {
-    // File does not exist yet
+    // File does not exist yet; safe to write
   }
 
-  return targetPath;
+  return { targetPath, notice };
 }
 export function registerTools(server) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -192,7 +199,7 @@ export function registerTools(server) {
               export_csv: {
                 type: "boolean",
                 default: false,
-                description: "Whether to export the full results to a local CSV file (default: true). Highly recommended for large datasets."
+                description: "Whether to export the full results to a local CSV file (default: false). Recommended when auditing large datasets."
               },
               csv_path: {
                 type: "string",
@@ -229,6 +236,11 @@ export function registerTools(server) {
             },
             required: ["keyword"],
           },
+          annotations: {
+            readOnlyHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+          },
         },
         {
           name: "get_domain_whois",
@@ -240,6 +252,11 @@ export function registerTools(server) {
               domain: { type: "string", description: "The full domain name to query (e.g. example.com)" }
             },
             required: ["domain"],
+          },
+          annotations: {
+            readOnlyHint: true,
+            idempotentHint: true,
+            openWorldHint: true
           },
         },
         {
@@ -264,6 +281,11 @@ export function registerTools(server) {
             },
             required: ["keyword"],
           },
+          annotations: {
+            readOnlyHint: true,
+            idempotentHint: true,
+            openWorldHint: true
+          },
         },
         {
           name: "search_keyword_combinations",
@@ -280,6 +302,11 @@ export function registerTools(server) {
             },
             required: ["keyword"],
           },
+          annotations: {
+            readOnlyHint: true,
+            idempotentHint: true,
+            openWorldHint: true
+          },
         },
         {
           name: "find_available_combinations",
@@ -292,6 +319,11 @@ export function registerTools(server) {
               industry: { type: "string" },
             },
             required: ["keyword"],
+          },
+          annotations: {
+            readOnlyHint: true,
+            idempotentHint: true,
+            openWorldHint: true
           },
         },
       ],
@@ -511,20 +543,36 @@ export function registerTools(server) {
         }
       });
 
-      // 6. Generate CSV file if requested (with path sanitization and overwrite protection)
+      // 6. Generate CSV file if requested (with path sanitization, overwrite protection, and error resilience)
       let csvFilePath = null;
-      let csvRaw = null;
+      let csvNotice = null;
+      let csvError = null;
+
       if (exportCsv && registeredRecords.length > 0) {
-        csvRaw = buildCsvContent(registeredRecords, rawKw);
-        const fileName = `${rawKw}_tld_timeline_${Date.now()}.csv`;
-        const targetPath = await resolveSafeCsvPath(args?.csv_path, fileName);
         try {
-          await fs.writeFile(targetPath, csvRaw, { encoding: "utf8", flag: "wx" });
-          csvFilePath = targetPath;
-        } catch (e) {
-          const fallbackPath = path.resolve(process.cwd(), `${rawKw}_tld_timeline_${Date.now()}_fallback.csv`);
-          await fs.writeFile(fallbackPath, csvRaw, "utf8");
-          csvFilePath = fallbackPath;
+          const csvRaw = buildCsvContent(registeredRecords, rawKw);
+          const fileName = `${rawKw}_tld_timeline_${Date.now()}.csv`;
+          const resolved = await resolveSafeCsvPath(args?.csv_path, fileName);
+          csvNotice = resolved.notice;
+
+          // Attempt 1: Write to resolved targetPath inside CWD
+          try {
+            await fs.writeFile(resolved.targetPath, csvRaw, { encoding: "utf8", flag: "wx" });
+            csvFilePath = resolved.targetPath;
+          } catch (writeErr) {
+            // Attempt 2: If CWD is read-only (e.g. Claude Desktop app directory or System32), fallback to os.tmpdir()
+            const tmpFallback = path.resolve(os.tmpdir(), fileName);
+            try {
+              await fs.writeFile(tmpFallback, csvRaw, "utf8");
+              csvFilePath = tmpFallback;
+              csvNotice = (csvNotice ? `${csvNotice} ` : "") + `Working directory is not writable; CSV was safely exported to temporary directory: ${tmpFallback}`;
+            } catch (tmpErr) {
+              // Attempt 3: If even tmpdir fails, record error without throwing so entire scan results are preserved
+              csvError = `Could not write CSV file to disk (CWD error: ${writeErr.code || writeErr.message}, tmpdir error: ${tmpErr.code || tmpErr.message})`;
+            }
+          }
+        } catch (genErr) {
+          csvError = `CSV generation failed: ${genErr.message}`;
         }
       }
 
@@ -581,6 +629,12 @@ export function registerTools(server) {
         const forwardSlashPath = csvFilePath.replace(/\\/g, "/");
         md += `- **Exported CSV Spreadsheet**: [\`${path.basename(csvFilePath)}\`](file:///${forwardSlashPath})\n`;
       }
+      if (csvNotice) {
+        md += `\n> [!NOTE] **CSV Export Notice**: ${csvNotice}\n`;
+      }
+      if (csvError) {
+        md += `\n> [!WARNING] **CSV Export Warning**: ${csvError}. Full scan results are preserved in the tables below.\n`;
+      }
 
       md += `\n### Historical Era Distribution\n`;
       md += `\`\`\`text\n`;
@@ -636,7 +690,9 @@ export function registerTools(server) {
         total_registered_found: registeredRecords.length,
         total_unverified: unverifiedTlds.length,
         csv_file_path: csvFilePath,
-        csv_exported: exportCsv && Boolean(csvFilePath),
+        csv_exported: Boolean(csvFilePath),
+        csv_notice: csvNotice || null,
+        csv_error: csvError || null,
         oldest_registration: oldest ? { domain: oldest.domain, year: oldest.registration_year, date: oldest.registration_date } : null,
         newest_registration: newest ? { domain: newest.domain, year: newest.registration_year, date: newest.registration_date } : null,
         era_distribution: {

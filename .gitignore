@@ -6,6 +6,7 @@ package-lock.json
 *.pem
 *.env
 *.csv
+*.zip
 test_*.js
 .DS_Store
 *.log
